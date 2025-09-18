@@ -1,0 +1,6 @@
+fastapi==0.116.2
+growwapi==0.0.9
+pydantic==2.11.9
+python-dotenv==1.1.1
+schedule==1.2.2
+uvicorn==0.35.0
