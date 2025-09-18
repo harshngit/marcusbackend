@@ -8,8 +8,6 @@ import threading
 import schedule
 import time as time_module
 
-# Load environment variables from .env file
-load_dotenv()
 
 # FastAPI initialization
 app = FastAPI(
@@ -23,8 +21,8 @@ class SymbolsRequest(BaseModel):
     symbols: list[str]
 
 # API credentials (from .env file)
-api_key = os.getenv("API_KEY")
-secret = os.getenv("API_SECRET")
+api_key = "eyJraWQiOiJaTUtjVXciLCJhbGciOiJFUzI1NiJ9.eyJleHAiOjI1NDY1OTE3NTQsImlhdCI6MTc1ODE5MTc1NCwibmJmIjoxNzU4MTkxNzU0LCJzdWIiOiJ7XCJ0b2tlblJlZklkXCI6XCJiMTBhNjkwZi0yYmVlLTQ1YjAtOWU5MC05MjZkN2FkZTZmZjBcIixcInZlbmRvckludGVncmF0aW9uS2V5XCI6XCJlMzFmZjIzYjA4NmI0MDZjODg3NGIyZjZkODQ5NTMxM1wiLFwidXNlckFjY291bnRJZFwiOlwiYWMzOWU4NDctMDQxZC00ODc5LTlkMDUtNWM3NmM5NTA4N2VkXCIsXCJkZXZpY2VJZFwiOlwiYzliN2IyN2YtMmM4Mi01NzM0LTkyMzUtZTk5ZWY4NTc4ODdkXCIsXCJzZXNzaW9uSWRcIjpcImRiNmQ3YTRjLTMxYmUtNGZhNC1hZmNhLTNlM2JjNjUyZTQyZlwiLFwiYWRkaXRpb25hbERhdGFcIjpcIno1NC9NZzltdjE2WXdmb0gvS0EwYk10cjZPY2NsZVdtWWt3aGFDcHJ2NjFSTkczdTlLa2pWZDNoWjU1ZStNZERhWXBOVi9UOUxIRmtQejFFQisybTdRPT1cIixcInJvbGVcIjpcImF1dGgtdG90cFwiLFwic291cmNlSXBBZGRyZXNzXCI6XCIyNDA1OjIwMTpmOjYxMDI6ZjlmNzo1MmY5OjkwYTE6MzljZiwxNzIuNjkuOTQuMTk4LDM1LjI0MS4yMy4xMjNcIixcInR3b0ZhRXhwaXJ5VHNcIjoyNTQ2NTkxNzU0NTE3fSIsImlzcyI6ImFwZXgtYXV0aC1wcm9kLWFwcCJ9.4su9BgG4cZpHOi0dQB9laDBTPAEYx8H7svni6krVZPRPi4lVoxYK5hONY48Vn5LT7ONDM1hv5qlt19xzOxHEPw"
+secret = ")AGhLpuhj6_g-5PpMp*s4sit5E#UtDlD"
 
 # Global variables for token management
 access_token = None
