@@ -15,7 +15,13 @@ BASE_DIR = Path(__file__).resolve().parent
 env_path = BASE_DIR / ".env"
 print(f"Looking for .env file at: {env_path}")
 print(f".env file exists: {env_path.exists()}")
-load_dotenv(dotenv_path=env_path, override=True)
+
+# Only load .env file if it exists (for local development)
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path, override=True)
+    print("Loaded environment variables from .env file")
+else:
+    print("No .env file found, using system environment variables (Railway/production)")
 
 # FastAPI initialization
 app = FastAPI(
@@ -37,18 +43,32 @@ app.add_middleware(
 class SymbolsRequest(BaseModel):
     symbols: list[str]
 
-# API credentials (from .env file)
-# Use safe defaults and strip whitespace to prevent accidental None/empty values
+# API credentials (from environment variables)
+# Get from environment variables (works for both Railway and local with .env)
 api_key = os.getenv("API_KEY")
 secret = os.getenv("API_SECRET")
+
+# Clean the credentials if they exist
+if api_key:
+    api_key = str(api_key).strip()
+if secret:
+    secret = str(secret).strip()
 
 # Debug environment variables
 print(f"API_KEY loaded: {'Yes' if api_key else 'No'}")
 print(f"API_SECRET loaded: {'Yes' if secret else 'No'}")
 if api_key:
     print(f"API_KEY length: {len(api_key)}")
+    print(f"API_KEY starts with: {api_key[:20]}...")
 if secret:
     print(f"API_SECRET length: {len(secret)}")
+    print(f"API_SECRET starts with: {secret[:5]}...")
+
+# Debug all environment variables (for Railway debugging)
+all_env_vars = list(os.environ.keys())
+print(f"Total environment variables: {len(all_env_vars)}")
+api_related_vars = [var for var in all_env_vars if 'API' in var.upper()]
+print(f"API-related environment variables: {api_related_vars}")
 
 # Validate credentials early
 if not api_key or not secret:
