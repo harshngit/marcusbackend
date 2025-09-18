@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from growwapi import GrowwAPI
 import os
@@ -16,6 +17,15 @@ app = FastAPI(
     title="Groww Stock Data API",
     description="API to fetch LTP and OHLC data for stock symbols",
     version="1.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with your frontend domain
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["*"],
 )
 
 # Define a Pydantic model for the input data (list of symbols)
