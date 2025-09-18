@@ -4,13 +4,18 @@ from pydantic import BaseModel
 from growwapi import GrowwAPI
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 from datetime import datetime, time, timedelta
 import threading
 import schedule
 import time as time_module
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file (explicit path for reliability)
+BASE_DIR = Path(__file__).resolve().parent
+env_path = BASE_DIR / ".env"
+print(f"Looking for .env file at: {env_path}")
+print(f".env file exists: {env_path.exists()}")
+load_dotenv(dotenv_path=env_path, override=True)
 
 # FastAPI initialization
 app = FastAPI(
@@ -33,8 +38,24 @@ class SymbolsRequest(BaseModel):
     symbols: list[str]
 
 # API credentials (from .env file)
+# Use safe defaults and strip whitespace to prevent accidental None/empty values
 api_key = os.getenv("API_KEY")
 secret = os.getenv("API_SECRET")
+
+# Debug environment variables
+print(f"API_KEY loaded: {'Yes' if api_key else 'No'}")
+print(f"API_SECRET loaded: {'Yes' if secret else 'No'}")
+if api_key:
+    print(f"API_KEY length: {len(api_key)}")
+if secret:
+    print(f"API_SECRET length: {len(secret)}")
+
+# Validate credentials early
+if not api_key or not secret:
+    print("ERROR: Missing API credentials!")
+    print("Make sure you have a .env file with:")
+    print("API_KEY=your_api_key_here")
+    print("API_SECRET=your_api_secret_here")
 
 # Global variables for token management
 access_token = None
@@ -45,15 +66,29 @@ def generate_access_token():
     """Generate a new access token and update the global groww client"""
     global access_token, groww, token_generated_date
     try:
+        # Validate required credentials early with clear messages
+        if not api_key:
+            raise HTTPException(status_code=500, detail="Missing API_KEY environment variable. Please check your .env file or environment settings.")
+        if not secret:
+            raise HTTPException(status_code=500, detail="Missing API_SECRET environment variable. Please check your .env file or environment settings.")
+        
         print(f"[{datetime.now()}] Generating new access token...")
-        access_token = GrowwAPI.get_access_token(api_key=api_key, secret=secret)
+        
+        # Clean the credentials
+        clean_api_key = str(api_key).strip()
+        clean_secret = str(secret).strip()
+        
+        access_token = GrowwAPI.get_access_token(api_key=clean_api_key, secret=clean_secret)
         groww = GrowwAPI(access_token)
         token_generated_date = datetime.now().date()
         print(f"[{datetime.now()}] Access token generated successfully!")
         return access_token
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is so routes can propagate correct status
+        raise
     except Exception as e:
         print(f"[{datetime.now()}] Error generating access token: {e}")
-        raise HTTPException(status_code=400, detail=f"Error fetching access token: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching access token: {str(e)}")
 
 def should_regenerate_token():
     """Check if token should be regenerated based on time and date"""
@@ -105,12 +140,30 @@ def schedule_token_refresh():
     scheduler_thread.start()
     print(f"[{datetime.now()}] Token refresh scheduler started - will refresh daily at 3:30 AM")
 
-# Initialize the access token and start the scheduler
-try:
-    generate_access_token()
-    schedule_token_refresh()
-except Exception as e:
-    print(f"Failed to initialize: {e}")
+# Health check endpoint
+@app.get("/")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "message": "Groww Stock Data API is running",
+        "timestamp": str(datetime.now()),
+        "credentials_loaded": {
+            "api_key": bool(api_key),
+            "api_secret": bool(secret)
+        }
+    }
+
+# Initialize the access token and start the scheduler only if credentials exist
+if api_key and secret:
+    try:
+        generate_access_token()
+        schedule_token_refresh()
+        print("✅ API initialized successfully!")
+    except Exception as e:
+        print(f"❌ Failed to initialize: {e}")
+else:
+    print("❌ Cannot initialize: Missing API credentials")
 
 # FastAPI route to get LTP for symbols
 @app.post("/get-ltp")
@@ -134,6 +187,9 @@ async def get_ltp(request: SymbolsRequest):
         # Get valid access token and groww client
         current_token, current_groww = get_valid_access_token()
         
+        if not current_groww:
+            raise HTTPException(status_code=500, detail="Groww client not initialized. Check API credentials.")
+        
         # Fetch LTP for each symbol
         ltp_response = {}
         for symbol in symbols:
@@ -144,9 +200,11 @@ async def get_ltp(request: SymbolsRequest):
         
         # Return the LTP data in the response
         return {"data": ltp_response}
-    
+    except HTTPException as he:
+        # Propagate existing HTTP errors (e.g., bad/missing credentials)
+        raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching LTP data: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching LTP data: {str(e)}")
 
 # FastAPI route to get OHLC for symbols
 @app.post("/get-ohlc")
@@ -170,6 +228,9 @@ async def get_ohlc(request: SymbolsRequest):
         # Get valid access token and groww client
         current_token, current_groww = get_valid_access_token()
         
+        if not current_groww:
+            raise HTTPException(status_code=500, detail="Groww client not initialized. Check API credentials.")
+        
         # Fetch OHLC for each symbol
         ohlc_response = {}
         for symbol in symbols:
@@ -180,9 +241,11 @@ async def get_ohlc(request: SymbolsRequest):
         
         # Return the OHLC data in the response
         return {"data": ohlc_response}
-    
+    except HTTPException as he:
+        # Propagate existing HTTP errors (e.g., bad/missing credentials)
+        raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching OHLC data: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching OHLC data: {str(e)}")
 
 # Token status endpoint for debugging
 @app.get("/token-status")
@@ -205,7 +268,11 @@ async def token_status():
         "token_generated_date": str(token_generated_date) if token_generated_date else None,
         "current_time": str(current_time),
         "next_refresh_time": str(next_refresh),
-        "should_regenerate": should_regenerate_token()
+        "should_regenerate": should_regenerate_token(),
+        "credentials_status": {
+            "api_key_loaded": bool(api_key),
+            "api_secret_loaded": bool(secret)
+        }
     }
 
 # Manual token refresh endpoint
@@ -222,7 +289,7 @@ async def manual_refresh_token():
             "token_generated_date": str(token_generated_date)
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error refreshing token: {e}")
+        raise HTTPException(status_code=500, detail=f"Error refreshing token: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
