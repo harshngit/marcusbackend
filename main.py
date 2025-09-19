@@ -9,6 +9,7 @@ from datetime import datetime, time, timedelta
 import threading
 import schedule
 import time as time_module
+from typing import Optional
 
 # Load environment variables from .env file (explicit path for reliability)
 BASE_DIR = Path(__file__).resolve().parent
@@ -26,7 +27,7 @@ else:
 # FastAPI initialization
 app = FastAPI(
     title="Groww Stock Data API",
-    description="API to fetch LTP and OHLC data for stock symbols",
+    description="API to fetch LTP, OHLC data and historical candle data for stock symbols",
     version="1.0.0"
 )
 
@@ -39,12 +40,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Define a Pydantic model for the input data (list of symbols)
+# Define Pydantic models
 class SymbolsRequest(BaseModel):
     symbols: list[str]
 
+class HistoricalDataRequest(BaseModel):
+    symbol: str
+    start_time: str  # Format: "2025-02-27 10:00:00" or epoch timestamp
+    end_time: str    # Format: "2025-02-27 14:00:00" or epoch timestamp
+    interval: int = 5  # Interval in minutes, default 5
+    exchange: str = "NSE"  # Default exchange
+
 # API credentials (from environment variables)
-# Get from environment variables (works for both Railway and local with .env)
 api_key = os.getenv("API_KEY")
 secret = os.getenv("API_SECRET")
 
@@ -63,12 +70,6 @@ if api_key:
 if secret:
     print(f"API_SECRET length: {len(secret)}")
     print(f"API_SECRET starts with: {secret[:5]}...")
-
-# Debug all environment variables (for Railway debugging)
-all_env_vars = list(os.environ.keys())
-print(f"Total environment variables: {len(all_env_vars)}")
-api_related_vars = [var for var in all_env_vars if 'API' in var.upper()]
-print(f"API-related environment variables: {api_related_vars}")
 
 # Validate credentials early
 if not api_key or not secret:
@@ -104,7 +105,6 @@ def generate_access_token():
         print(f"[{datetime.now()}] Access token generated successfully!")
         return access_token
     except HTTPException:
-        # Re-raise HTTP exceptions as-is so routes can propagate correct status
         raise
     except Exception as e:
         print(f"[{datetime.now()}] Error generating access token: {e}")
@@ -190,38 +190,30 @@ else:
 async def get_ltp(request: SymbolsRequest):
     """
     Get Last Traded Price (LTP) for the provided stock symbols.
-    
-    Args:
-        request: SymbolsRequest containing list of stock symbols
-        
-    Returns:
-        dict: LTP data for each symbol
     """
     try:
-        symbols = request.symbols  # List of symbols from the request body
+        symbols = request.symbols
         
-        # Validate if symbols are provided
         if not symbols:
             raise HTTPException(status_code=400, detail="Symbols list cannot be empty")
         
-        # Get valid access token and groww client
         current_token, current_groww = get_valid_access_token()
         
         if not current_groww:
             raise HTTPException(status_code=500, detail="Groww client not initialized. Check API credentials.")
         
-        # Fetch LTP for each symbol
         ltp_response = {}
         for symbol in symbols:
+            # FIX: Correct format for exchange_trading_symbols
+            exchange_symbol = f"NSE_{symbol}"  # Format: NSE_RELIANCE
             ltp_data = current_groww.get_ltp(
-                segment=current_groww.SEGMENT_CASH, exchange_trading_symbols=[symbol]
+                segment=current_groww.SEGMENT_CASH, 
+                exchange_trading_symbols=[exchange_symbol]
             )
             ltp_response[symbol] = ltp_data
         
-        # Return the LTP data in the response
         return {"data": ltp_response}
     except HTTPException as he:
-        # Propagate existing HTTP errors (e.g., bad/missing credentials)
         raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching LTP data: {str(e)}")
@@ -231,52 +223,154 @@ async def get_ltp(request: SymbolsRequest):
 async def get_ohlc(request: SymbolsRequest):
     """
     Get OHLC (Open, High, Low, Close) data for the provided stock symbols.
-    
-    Args:
-        request: SymbolsRequest containing list of stock symbols
-        
-    Returns:
-        dict: OHLC data for each symbol
     """
     try:
-        symbols = request.symbols  # List of symbols from the request body
+        symbols = request.symbols
         
-        # Validate if symbols are provided
         if not symbols:
             raise HTTPException(status_code=400, detail="Symbols list cannot be empty")
         
+        current_token, current_groww = get_valid_access_token()
+        
+        if not current_groww:
+            raise HTTPException(status_code=500, detail="Groww client not initialized. Check API credentials.")
+        
+        ohlc_response = {}
+        for symbol in symbols:
+            # FIX: Correct format for exchange_trading_symbols
+            exchange_symbol = f"NSE_{symbol}"  # Format: NSE_RELIANCE
+            ohlc_data = current_groww.get_ohlc(
+                segment=current_groww.SEGMENT_CASH, 
+                exchange_trading_symbols=[exchange_symbol]
+            )
+            ohlc_response[symbol] = ohlc_data
+        
+        return {"data": ohlc_response}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching OHLC data: {str(e)}")
+
+# FastAPI route to get historical candle data
+@app.post("/get-historical-data")
+async def get_historical_data(request: HistoricalDataRequest):
+    """
+    Get historical candle data for the provided stock symbol.
+    
+    Args:
+        request: HistoricalDataRequest containing symbol, start_time, end_time, interval, exchange
+        
+    Returns:
+        dict: Historical candle data in array format with epoch timestamps
+    """
+    try:
         # Get valid access token and groww client
         current_token, current_groww = get_valid_access_token()
         
         if not current_groww:
             raise HTTPException(status_code=500, detail="Groww client not initialized. Check API credentials.")
         
-        # Fetch OHLC for each symbol
-        ohlc_response = {}
-        for symbol in symbols:
-            ohlc_data = current_groww.get_ohlc(
-                segment=current_groww.SEGMENT_CASH, exchange_trading_symbols=[symbol]
-            )
-            ohlc_response[symbol] = ohlc_data
+        # Debug: Print request parameters
+        print(f"[DEBUG] Historical data request: symbol={request.symbol}, start_time={request.start_time}, end_time={request.end_time}, interval={request.interval}, exchange={request.exchange}")
         
-        # Return the OHLC data in the response
-        return {"data": ohlc_response}
+        # Determine exchange correctly
+        if request.exchange.upper() == "NSE":
+            exchange = current_groww.EXCHANGE_NSE
+        elif request.exchange.upper() == "BSE":
+            exchange = current_groww.EXCHANGE_BSE
+        else:
+            exchange = current_groww.EXCHANGE_NSE  # Default to NSE
+        
+        print(f"[DEBUG] Using exchange: {exchange}")
+        
+        # Fetch historical data from Groww API with proper error handling
+        try:
+            historical_data = current_groww.get_historical_candle_data(
+                trading_symbol=request.symbol,
+                exchange=exchange,
+                segment=current_groww.SEGMENT_CASH,
+                start_time=request.start_time,
+                end_time=request.end_time,
+                interval_in_minutes=request.interval
+            )
+            print(f"[DEBUG] Raw historical data received: {type(historical_data)}")
+            print(f"[DEBUG] Historical data: {historical_data}")
+        except Exception as api_error:
+            print(f"[ERROR] Groww API error: {api_error}")
+            raise HTTPException(status_code=500, detail=f"Groww API error: {str(api_error)}")
+        
+        # Transform the data to the desired format (robust to various shapes)
+        candles_array = []
+        
+        def append_from_dict(candle_dict):
+            try:
+                timestamp_seconds = candle_dict.get('time', candle_dict.get('t', 0))
+                if isinstance(timestamp_seconds, str):
+                    timestamp_seconds = int(float(timestamp_seconds))
+                if timestamp_seconds > 9999999999:
+                    timestamp_seconds = int(timestamp_seconds / 1000)
+                candles_array.append([
+                    int(timestamp_seconds),
+                    float(candle_dict.get('open', candle_dict.get('o', 0))),
+                    float(candle_dict.get('high', candle_dict.get('h', 0))),
+                    float(candle_dict.get('low', candle_dict.get('l', 0))),
+                    float(candle_dict.get('close', candle_dict.get('c', 0))),
+                    int(candle_dict.get('volume', candle_dict.get('v', 0)))
+                ])
+            except Exception as _:
+                pass
+
+        def append_from_list(candle_list):
+            try:
+                # Expect [t, o, h, l, c, v?]
+                t = int(candle_list[0])
+                if t > 9999999999:
+                    t = int(t / 1000)
+                o, h, l, c = map(float, candle_list[1:5])
+                v = int(candle_list[5]) if len(candle_list) > 5 else 0
+                candles_array.append([t, o, h, l, c, v])
+            except Exception as _:
+                pass
+
+        def iterate_and_append(items):
+            for item in items:
+                if isinstance(item, dict):
+                    append_from_dict(item)
+                elif isinstance(item, (list, tuple)):
+                    append_from_list(item)
+
+        if historical_data:
+            if isinstance(historical_data, dict) and 'candles' in historical_data and isinstance(historical_data['candles'], list):
+                iterate_and_append(historical_data['candles'])
+            elif isinstance(historical_data, dict) and 'data' in historical_data and isinstance(historical_data['data'], dict) and isinstance(historical_data['data'].get('candles'), list):
+                iterate_and_append(historical_data['data']['candles'])
+            elif isinstance(historical_data, list):
+                iterate_and_append(historical_data)
+        
+        # Return in the requested format
+        response = {
+            "candles": candles_array,
+            "start_time": request.start_time,
+            "end_time": request.end_time,
+            "interval_in_minutes": request.interval
+        }
+        
+        print(f"[DEBUG] Final response with {len(candles_array)} candles")
+        return response
+        
     except HTTPException as he:
-        # Propagate existing HTTP errors (e.g., bad/missing credentials)
         raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching OHLC data: {str(e)}")
+        print(f"[ERROR] Unexpected error in get_historical_data: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching historical data: {str(e)}")
 
 # Token status endpoint for debugging
 @app.get("/token-status")
 async def token_status():
-    """
-    Get current token status and next refresh time.
-    """
+    """Get current token status and next refresh time."""
     global token_generated_date
     current_time = datetime.now()
     
-    # Calculate next refresh time
     today_330am = datetime.combine(current_time.date(), time(3, 30))
     if current_time >= today_330am:
         next_refresh = datetime.combine(current_time.date() + timedelta(days=1), time(3, 30))
@@ -298,9 +392,7 @@ async def token_status():
 # Manual token refresh endpoint
 @app.post("/refresh-token")
 async def manual_refresh_token():
-    """
-    Manually refresh the access token.
-    """
+    """Manually refresh the access token."""
     try:
         generate_access_token()
         return {
@@ -310,6 +402,27 @@ async def manual_refresh_token():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error refreshing token: {str(e)}")
+
+    """Debug endpoint to list available Groww API methods"""
+    try:
+        current_token, current_groww = get_valid_access_token()
+        if not current_groww:
+            return {"error": "Groww client not initialized"}
+        
+        methods = [method for method in dir(current_groww) if not method.startswith('_')]
+        constants = {
+            "EXCHANGE_NSE": getattr(current_groww, 'EXCHANGE_NSE', 'Not found'),
+            "EXCHANGE_BSE": getattr(current_groww, 'EXCHANGE_BSE', 'Not found'),
+            "SEGMENT_CASH": getattr(current_groww, 'SEGMENT_CASH', 'Not found'),
+        }
+        
+        return {
+            "methods": methods,
+            "constants": constants,
+            "groww_type": str(type(current_groww))
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
